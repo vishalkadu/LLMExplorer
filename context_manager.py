@@ -1,63 +1,107 @@
 import json
-
 import redis
-
-# Initialize Redis connection
-redis_client = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
-
-
-def get_conversation_history(user_id):
-    """Retrieve conversation history from Redis."""
-    conversation = redis_client.get(user_id)
-    if conversation:
-        return json.loads(conversation)
-    return []
+from typing import List, Dict
+from datetime import datetime
 
 
-def save_conversation_history(user_id, conversation_history):
-    """Save conversation history to Redis."""
-    redis_client.set(user_id, json.dumps(conversation_history))
+class ChatContextManager:
+    def __init__(self, redis_host='localhost', redis_port=6379, db=0):
+        self.redis_client = redis.StrictRedis(
+            host=redis_host,
+            port=redis_port,
+            db=db,
+            decode_responses=True
+        )
 
+    @staticmethod
+    def _get_chat_key(username: str, chat_id: str) -> str:
+        """Generate a unique Redis key for a specific chat."""
+        return f"chat:{username}:{chat_id}"
 
-def update_conversation_history(user_id, user_input, assistant_response):
-    """Update the conversation history with user and assistant messages."""
-    # Get current conversation history
-    conversation_history = get_conversation_history(user_id)
+    @staticmethod
+    def _get_user_chats_key(username: str) -> str:
+        """Generate a Redis key for storing chat metadata."""
+        return f"chats:{username}"
 
-    # Add user message and assistant response to the conversation
-    conversation_history.append({"role": "user", "content": user_input})
-    conversation_history.append({"role": "assistant", "content": assistant_response})
+    def create_new_chat(self, username: str, chat_name: str, context: str = "") -> str:
+        """Create a new chat with optional context."""
+        chat_id = str(self.redis_client.incr(f"chat_counter:{username}"))
 
-    # Save the updated conversation back to Redis
-    save_conversation_history(user_id, conversation_history)
+        chat_metadata = {
+            "id": chat_id,
+            "name": chat_name,
+            "context": context,
+            "created_at": datetime.now().isoformat(),
+            "messages_count": 0,
+            "last_updated": datetime.now().isoformat()
+        }
 
-    return conversation_history
+        chats_key = self._get_user_chats_key(username)
+        self.redis_client.hset(chats_key, chat_id, json.dumps(chat_metadata))
 
-############################################################################################################
+        chat_key = self._get_chat_key(username, chat_id)
+        self.redis_client.set(chat_key, json.dumps([]))
 
-# WIP - Embedding history
-def get_embedding_history(user_id):
-    """Retrieve embedding history from Redis."""
-    embeddings = redis_client.get(f"{user_id}_embeddings")
-    if embeddings:
-        return json.loads(embeddings)
-    return []
+        return chat_id
 
+    def get_user_chats(self, username: str) -> List[Dict]:
+        """Get all chats for a user."""
+        chats_key = self._get_user_chats_key(username)
+        chats_data = self.redis_client.hgetall(chats_key)
+        return [json.loads(chat_data) for chat_data in chats_data.values()]
 
-def save_embedding_history(user_id, embedding_history):
-    """Save embedding history to Redis."""
-    redis_client.set(f"{user_id}_embeddings", json.dumps(embedding_history))
+    def get_conversation_history(self, username: str, chat_id: str) -> List[Dict]:
+        """Retrieve conversation history for a specific chat."""
+        chat_key = self._get_chat_key(username, chat_id)
+        conversation = self.redis_client.get(chat_key)
+        return json.loads(conversation) if conversation else []
 
+    def update_conversation_history(
+            self,
+            username: str,
+            chat_id: str,
+            user_input: str,
+            assistant_response: str
+    ) -> List[Dict]:
+        """Update the conversation history for a specific chat."""
+        chat_key = self._get_chat_key(username, chat_id)
+        conversation_history = self.get_conversation_history(username, chat_id)
 
-def update_embedding_history(user_id, prompt, embedding_response):
-    """Update the embedding history with the prompt and generated embedding."""
-    # Get current embedding history
-    embedding_history = get_embedding_history(user_id)
+        conversation_history.extend([
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": assistant_response}
+        ])
 
-    # Add prompt and embedding response to the history
-    embedding_history.append({"prompt": prompt, "embedding": embedding_response})
+        self.redis_client.set(chat_key, json.dumps(conversation_history))
 
-    # Save the updated embedding history back to Redis
-    save_embedding_history(user_id, embedding_history)
+        # Update chat metadata
+        chats_key = self._get_user_chats_key(username)
+        chat_metadata = json.loads(self.redis_client.hget(chats_key, chat_id))
+        chat_metadata["messages_count"] += 2
+        chat_metadata["last_updated"] = datetime.now().isoformat()
+        self.redis_client.hset(chats_key, chat_id, json.dumps(chat_metadata))
 
-    return embedding_history
+        return conversation_history
+
+    def delete_chat(self, username: str, chat_id: str) -> bool:
+        """Delete a specific chat and its history."""
+        chat_key = self._get_chat_key(username, chat_id)
+        self.redis_client.delete(chat_key)
+
+        chats_key = self._get_user_chats_key(username)
+        return bool(self.redis_client.hdel(chats_key, chat_id))
+
+    def update_chat_name(self, username: str, chat_id: str, new_name: str) -> bool:
+        """Update chat name."""
+        chats_key = self._get_user_chats_key(username)
+        chat_metadata = self.redis_client.hget(chats_key, chat_id)
+
+        if not chat_metadata:
+            return False
+
+        chat_metadata = json.loads(chat_metadata)
+        chat_metadata["name"] = new_name
+        chat_metadata["last_updated"] = datetime.now().isoformat()
+
+        self.redis_client.hset(chats_key, chat_id, json.dumps(chat_metadata))
+        return True
