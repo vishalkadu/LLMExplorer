@@ -41,17 +41,12 @@ Start the app by running the **ServiceManager**:
 ```bash
 streamlit run service_manager.py
 ```  
-
----
-
-# ServiceManager  
-
-**ServiceManager** is a simple Streamlit app that helps you start and manage the following services:  
+it helps you start and manage the following services:  
 - **Redis**  
 - **Ollama**  
 - **Streamlit**  
 
-With just one click, you can ensure that all the necessary services are running for your application.  
+With just one click, you can ensure that all the necessary services are running for application.  
 
 ---
 
