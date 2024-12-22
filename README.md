@@ -5,11 +5,20 @@ LLMExplorer is a simple app to interact with **Ollama language models**. It allo
 ---
 
 ## Installation  
-
 ### Step 0: Install Ollama  
 
 Download and install Ollama from the official website:  
 [https://ollama.com/download](https://ollama.com/download)  
+
+After installation, download the model of your choice by running below command:  
+```bash
+ollama pull <model-name>
+```
+
+For example, to download the **llama3.2:latest** model, use command:  
+```bash
+ollama pull llama3.2:latest
+```  
 
 ### Step 1: Clone the Repository  
 
